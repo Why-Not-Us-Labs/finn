@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import Link from 'next/link'
 
 // ─── Data Types ──────────────────────────────────────────────
@@ -713,7 +713,14 @@ export default function Dashboard() {
       fetch('/api/activity').then(r => r.json()).catch(() => []),
       fetch('/api/inbox-status').then(r => r.json()).catch(() => ({ lastReviewed: null, pendingCount: 0, urgentCount: 0 })),
     ])
-    setTasks(tasksRes)
+    // Preserve locally completed tasks
+    const mergedTasks = tasksRes.map((t: any) => {
+      if (localCompletedTasksRef?.current?.has(t.id)) {
+        return { ...t, status: 'done' }
+      }
+      return t
+    })
+    setTasks(mergedTasks)
     setDrafts(draftsRes)
     setActivity(activityRes)
     setInboxStatus(inboxRes)
@@ -726,12 +733,21 @@ export default function Dashboard() {
   }, [fetchAll])
 
   // Fetch action items
+  const localCompletedRef = React.useRef<Set<string>>(new Set())
+
   useEffect(() => {
     const fetchAI = async () => {
       try {
         const res = await fetch('/api/action-items')
         const data = await res.json()
-        setActionItems(data)
+        // Merge: keep local completions that may not have propagated yet
+        const merged = data.map((item: any) => {
+          if (localCompletedRef.current.has(item.id)) {
+            return { ...item, status: 'done', completedAt: item.completedAt || new Date().toISOString() }
+          }
+          return item
+        })
+        setActionItems(merged)
       } catch { /* ignore */ }
     }
     fetchAI()
@@ -813,14 +829,18 @@ export default function Dashboard() {
     return items
   }, [actionItems, sourceFilter, projectFilter, sortBy])
 
+  const localCompletedTasksRef = React.useRef<Set<string>>(new Set())
+
   const handleCompleteTask = async (id: string) => {
-    await fetch(`/api/tasks/${id}/complete`, { method: 'POST' })
+    localCompletedTasksRef.current.add(id)
     setTasks(prev => prev.map(t => t.id === id ? { ...t, status: 'done' } : t))
+    await fetch(`/api/tasks/${id}/complete`, { method: 'POST' })
   }
 
   const handleCompleteActionItem = async (id: string) => {
-    await fetch(`/api/action-items/${id}/complete`, { method: 'POST' })
+    localCompletedRef.current.add(id)
     setActionItems(prev => prev.map(i => i.id === id ? { ...i, status: 'done', completedAt: new Date().toISOString() } : i))
+    await fetch(`/api/action-items/${id}/complete`, { method: 'POST' })
   }
 
   const handleToggleInbox = async () => {
