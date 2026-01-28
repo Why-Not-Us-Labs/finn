@@ -24,10 +24,10 @@ query {
   teams(filter: { key: { eq: "WNU" } }) {
     nodes {
       issues(
-        first: 100
+        first: 250
         orderBy: updatedAt
         filter: {
-          state: { type: { nin: ["canceled"] } }
+          assignee: { isMe: { eq: true } }
         }
       ) {
         nodes {
@@ -35,6 +35,8 @@ query {
           identifier
           title
           priority
+          priorityLabel
+          completedAt
           updatedAt
           state { name type }
           assignee { name avatarUrl }
@@ -66,15 +68,8 @@ export async function GET() {
     const json = await res.json()
     const issues = json?.data?.teams?.nodes?.[0]?.issues?.nodes || []
 
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-
     const filtered = issues
-      .filter((i: any) => {
-        if (i.state.type === 'completed') {
-          return new Date(i.updatedAt) > sevenDaysAgo
-        }
-        return true
-      })
+      .filter((i: any) => i.state.type !== 'canceled')
       .map((i: any): LinearIssue => ({
         id: i.id,
         identifier: i.identifier,
