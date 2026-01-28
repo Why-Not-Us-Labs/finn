@@ -460,31 +460,61 @@ function HBarChart({ data, colorMap }: { data: { label: string; value: number; i
 }
 
 // ─── Action Items Dashboard (Right Side) ─────────────────────
-function ActionItemsDashboard({ items }: { items: ActionItem[] }) {
-  const total = items.length
-  const done = items.filter(i => i.status === 'done').length
-  const overdue = items.filter(i => {
+function ActionItemsDashboard({ items, linearData }: { items: ActionItem[]; linearData: LinearData }) {
+  // Linear counts by status
+  const linearDone = (linearData['Done'] || []).length
+  const linearInProgress = (linearData['In Progress'] || []).length
+  const linearTodo = (linearData['Todo'] || []).length
+  const linearBacklog = (linearData['Backlog'] || []).length + (linearData['Triage'] || []).length
+  const linearTotal = Object.values(linearData).reduce((s, arr) => s + arr.length, 0)
+
+  // Action item counts
+  const aiDone = items.filter(i => i.status === 'done').length
+  const aiOverdue = items.filter(i => {
     if (i.status === 'done') return false
     const today = new Date(); today.setHours(0,0,0,0)
     return new Date(i.dueDate + 'T00:00:00') < today
   }).length
-  const pending = total - done - overdue
+  const aiInProgress = 0 // action items don't have in-progress status currently
+  const aiPending = items.length - aiDone - aiOverdue
+
+  // Merged totals
+  const done = aiDone + linearDone
+  const inProgress = aiInProgress + linearInProgress
+  const pending = aiPending + linearTodo
+  const overdue = aiOverdue
+  const backlog = linearBacklog
+  const total = items.length + linearTotal
   const pct = total > 0 ? Math.round((done / total) * 100) : 0
 
-  // Priority breakdown
+  // Priority breakdown — merge action items + Linear
+  const linearPriorityMap: Record<number, string> = { 1: 'urgent', 2: 'high', 3: 'medium', 4: 'low', 0: 'low' }
+  const allLinearIssues = Object.values(linearData).flat()
+  const linearByPriority: Record<string, number> = { urgent: 0, high: 0, medium: 0, low: 0 }
+  allLinearIssues.forEach(issue => {
+    if (issue.statusType === 'completed' || issue.statusType === 'canceled') return
+    const p = linearPriorityMap[issue.priority] || 'low'
+    linearByPriority[p] = (linearByPriority[p] || 0) + 1
+  })
+
   const byPriority = ['urgent', 'high', 'medium', 'low'].map(p => ({
     label: p.charAt(0).toUpperCase() + p.slice(1),
-    value: items.filter(i => i.priority === p && i.status !== 'done').length,
+    value: items.filter(i => i.priority === p && i.status !== 'done').length + (linearByPriority[p] || 0),
   }))
 
-  // By source
-  const sourceData = ['granola', 'linear', 'email', 'slack', 'imessage']
+  // By source — add Linear as its own source
+  const sourceData = ['granola', 'email', 'slack', 'imessage']
     .map(s => ({ label: s.charAt(0).toUpperCase() + s.slice(1), value: items.filter(i => i.source === s).length, icon: SOURCE_EMOJI[s] }))
     .filter(d => d.value > 0)
+  if (linearTotal > 0) {
+    sourceData.push({ label: 'Linear', value: linearTotal, icon: '📋' })
+  }
+  sourceData.sort((a, b) => b.value - a.value)
 
   // By project
   const projectCounts: Record<string, number> = {}
   items.forEach(i => { projectCounts[i.project] = (projectCounts[i.project] || 0) + 1 })
+  if (linearTotal > 0) { projectCounts['Why Not Us Labs'] = (projectCounts['Why Not Us Labs'] || 0) + linearTotal }
   const projectData = Object.entries(projectCounts)
     .sort((a, b) => b[1] - a[1])
     .map(([label, value]) => ({ label, value }))
@@ -504,23 +534,52 @@ function ActionItemsDashboard({ items }: { items: ActionItem[] }) {
       <div className="glass p-5 flex flex-col items-center">
         <p className="text-[10px] uppercase tracking-[0.15em] text-zinc-500 mb-3">Completion</p>
         <DonutChart
-          size={130}
-          strokeWidth={16}
+          size={140}
+          strokeWidth={18}
           centerLabel={`${pct}%`}
-          centerSub={`${done}/${total}`}
+          centerSub={`${done} / ${total}`}
           segments={[
             { value: done, color: DONUT_COLORS.done, label: 'Done' },
+            { value: inProgress, color: '#3b82f6', label: 'In Progress' },
             { value: pending, color: DONUT_COLORS.pending, label: 'Pending' },
             { value: overdue, color: DONUT_COLORS.overdue, label: 'Overdue' },
+            { value: backlog, color: '#a855f7', label: 'Backlog' },
           ]}
         />
-        <div className="flex gap-4 mt-3">
-          {[{ c: DONUT_COLORS.done, l: 'Done', v: done }, { c: DONUT_COLORS.pending, l: 'Pending', v: pending }, { c: DONUT_COLORS.overdue, l: 'Overdue', v: overdue }].map(x => (
+        <div className="flex flex-wrap justify-center gap-x-3 gap-y-1 mt-3">
+          {[
+            { c: DONUT_COLORS.done, l: 'Done', v: done },
+            { c: '#3b82f6', l: 'In Progress', v: inProgress },
+            { c: DONUT_COLORS.pending, l: 'Pending', v: pending },
+            { c: DONUT_COLORS.overdue, l: 'Overdue', v: overdue },
+            { c: '#a855f7', l: 'Backlog', v: backlog },
+          ].filter(x => x.v > 0).map(x => (
             <div key={x.l} className="flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: x.c }} />
               <span className="text-[10px] text-zinc-500">{x.l} ({x.v})</span>
             </div>
           ))}
+        </div>
+        {/* Status breakdown */}
+        <div className="w-full mt-4 pt-3 border-t border-white/[0.04]">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] text-zinc-600 uppercase tracking-widest">Total</span>
+            <span className="text-sm font-bold text-white/90">{total}</span>
+          </div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 mt-2">
+            {[
+              { l: 'Done', v: done, c: 'text-emerald-400' },
+              { l: 'In Progress', v: inProgress, c: 'text-blue-400' },
+              { l: 'Pending', v: pending, c: 'text-zinc-400' },
+              { l: 'Overdue', v: overdue, c: 'text-red-400' },
+              { l: 'Backlog', v: backlog, c: 'text-purple-400' },
+            ].filter(x => x.v > 0).map(x => (
+              <div key={x.l} className="flex items-center justify-between">
+                <span className="text-[10px] text-zinc-500">{x.l}</span>
+                <span className={`text-[11px] font-mono font-medium ${x.c}`}>{x.v}</span>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -1050,7 +1109,7 @@ export default function Dashboard() {
               </svg>
             </button>
             <div className={`${chartsCollapsed ? 'hidden' : 'block'} lg:block`}>
-              <ActionItemsDashboard items={filteredItems} />
+              <ActionItemsDashboard items={filteredItems} linearData={sourceFilter === 'all' && projectFilter === 'All' ? linearData : (sourceFilter === 'linear' ? linearData : {})} />
             </div>
           </div>
         </div>
