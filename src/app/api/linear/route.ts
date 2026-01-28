@@ -21,28 +21,25 @@ const CACHE_TTL = 5 * 60 * 1000
 
 const QUERY = `
 query {
-  teams(filter: { key: { eq: "WNU" } }) {
+  issues(
+    first: 250
+    orderBy: updatedAt
+    filter: {
+      assignee: { isMe: { eq: true } }
+      team: { key: { eq: "WNU" } }
+    }
+  ) {
     nodes {
-      issues(
-        first: 250
-        orderBy: updatedAt
-        filter: {
-          assignee: { isMe: { eq: true } }
-        }
-      ) {
-        nodes {
-          id
-          identifier
-          title
-          priority
-          priorityLabel
-          completedAt
-          updatedAt
-          state { name type }
-          assignee { name avatarUrl }
-          labels { nodes { name } }
-        }
-      }
+      id
+      identifier
+      title
+      priority
+      priorityLabel
+      completedAt
+      updatedAt
+      state { name type }
+      assignee { name avatarUrl }
+      labels { nodes { name } }
     }
   }
 }
@@ -66,7 +63,7 @@ export async function GET() {
     })
 
     const json = await res.json()
-    const issues = json?.data?.teams?.nodes?.[0]?.issues?.nodes || []
+    const issues = json?.data?.issues?.nodes || []
 
     const filtered = issues
       .filter((i: any) => i.state.type !== 'canceled')
